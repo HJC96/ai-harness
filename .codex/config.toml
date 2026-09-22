@@ -1,0 +1,4 @@
+# Model, reasoning effort, and permissions inherit from the current session.
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 3
