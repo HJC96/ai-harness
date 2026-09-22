@@ -26,6 +26,7 @@
 task_id:
 role: 역할 이름과 TOML 절대 경로
 skill: SKILL.md 절대 경로
+review_scope: 검토 작업이면 plan | chapter-fact | chapter-reader | final 중 하나
 book_root:
 goal: 이번 작업의 결과
 inputs: 파일 절대 경로와 실제 SHA-256, 선행 작업 ID
@@ -60,10 +61,12 @@ report_path: handoffs/<task-id>.md
 
 ## 검토 판정
 
-검토 문서에는 `PASS`, `REVISE`, `BLOCKED` 중 하나의 판정, `검토 파일 경로 + SHA-256`, 검토에 사용한 request·plan·research·선행 원고 등 모든 입력의 경로·SHA-256을 기록한다. Python 표준 라이브러리 `hashlib` 또는 사용 가능한 해시 도구로 실제 파일 바이트의 해시를 계산한다. 해시를 추측하지 않는다. 배정 시의 해시와 실제 읽은 해시가 다르면 입력 변경으로 보고한다.
+검토 문서에는 배정된 `review_scope`, `PASS`·`REVISE`·`BLOCKED` 중 하나의 판정, `검토 파일 경로 + SHA-256`, 검토에 사용한 request·plan·research·선행 원고 등 모든 입력의 경로·SHA-256을 기록한다. Python 표준 라이브러리 `hashlib` 또는 사용 가능한 해시 도구로 실제 파일 바이트의 해시를 계산한다. 해시를 추측하지 않는다. 배정 시의 해시와 실제 읽은 해시가 다르면 입력 변경으로 보고한다.
 
 - `PASS`: 맡은 범위의 필수 조건 충족, 해결하지 않은 중대 결함 없음.
 - `REVISE`: 오류, 목차 누락, 설명의 비약, 잘못된 해설 등 수정 가능한 결함 존재.
 - `BLOCKED`: 근거·입력·도구가 없어 필수 검증을 마칠 수 없음.
 
 각 지적은 ID, 심각도(`major`/`minor`), 파일·절, 이유, 필요한 수정, 재검토 결과를 포함한다. `major`가 열려 있으면 `PASS`를 주지 않는다. `minor`를 남길 때는 학습을 방해하지 않는 이유를 적는다. 본문 또는 사용한 입력이 변경되면 이전 `PASS`를 재사용할 수 없다.
+
+지적은 `장 ID / review_scope / 지적 ID`로 구분한다. 사실 축과 독자 축의 같은 번호를 하나로 합치지 않으며, 같은 범위의 재검토에서는 기존 ID를 유지한다. 다른 축과 지적이 일치하는지는 유효성 조건이 아니다.
