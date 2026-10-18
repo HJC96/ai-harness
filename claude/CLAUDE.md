@@ -10,11 +10,11 @@ Codex 쪽 구현은 `codex/agents/`와 `shared/skills/book-*`에 따로 있다. 
 bash scripts/install-claude.sh            # ~/.claude 로 심볼릭 링크
 bash scripts/install-claude.sh --check     # 상태 확인
 bash scripts/install-claude.sh --uninstall # 이 하네스가 만든 링크만 제거
-bash scripts/install-claude.sh --doctor    # 이름·참조 경로 정합성 점검
+bash scripts/install-claude.sh --doctor    # 이름·참조 경로 정합성, 정의 중복 점검
 python3 -m unittest discover -s tests -v  # 임시 환경에서 설치·게이트·합본 회귀 검증
 ```
 
-원본은 저장소에 남고 `~/.claude`에는 역할·지휘 파일별, 스킬별 링크가 생긴다. **저장소 파일을 고치면 다음 세션에 반영된다.** 설치 전에 전체 대상의 충돌을 확인하므로 뒤쪽 파일이 충돌해도 일부만 설치되지 않는다. 실제 파일과 다른 링크는 보존한다. `--doctor`는 설치 전에도 원본을 검사하고, `--check`는 설치된 링크를 검사한다. Python 3.8 이상이 필요하다.
+원본은 저장소에 남고 `~/.claude`에는 역할·지휘 파일별, 스킬별 링크가 생긴다. **저장소 파일을 고치면 다음 세션에 반영된다.** 설치 전에 전체 대상의 충돌을 확인하므로 뒤쪽 파일이 충돌해도 일부만 설치되지 않는다. 실제 파일과 다른 링크는 보존한다. `--doctor`는 설치 전에도 원본을 검사하고, `--check`는 설치된 링크를 검사한다. Python 3.9 이상이 필요하다.
 
 사용자 지정 설정 디렉터리는 `CLAUDE_CONFIG_DIR=/절대/경로 bash scripts/install-claude.sh`로 지정한다. 이전 스크립트의 `CLAUDE_HOME`도 대체 변수로 받는다. 문서의 `~/.claude`는 기본 경로 표기이며 작업 배정에는 실제 설정 경로를 쓴다. 전역 `CLAUDE.md`나 권한 설정은 수정하지 않는다. 저장소에서의 진입 지침은 루트 `CLAUDE.md`가 이 문서를 불러온다.
 
@@ -41,6 +41,7 @@ shared/orchestration/
   교재-파이프라인.md      지휘자 규칙 · 팀 구성 · Phase 0~5 · 병렬 · 되돌림 · 재개
   산출물-계약.md          Phase 사이를 건너는 물건의 규격 (계약서 · 챕터 · 리포트 · 배정 메시지)
   book.py                 계약을 기계로 검증하는 도구 (게이트) · 합본 생성
+  hook.py                 역할·스킬 frontmatter 훅 — 독립성을 깨는 쓰기 차단 · 작업 기록 · 종료 점검
 claude/agents/
   curriculum-architect.md  목차 → 학습 경로와 챕터 계약
   chapter-writer.md        계약 1장 → 본문 1장
@@ -51,7 +52,7 @@ shared/skills/
   교재/           진입점. 접수 후 파이프라인에 넘긴다
   교재-설계/      Phase 1 절차
   챕터-집필/      Phase 2 절차 (재집필 포함)
-  챕터-검수/      Phase 3 절차 (정확성 · 독자 두 모드)
+  챕터-검수/      Phase 3 절차 (정확성 · 독자 두 모드) + Phase 1 설계 검수
   교재-엮기/      Phase 4 절차
 shared/instructions/
   교재-공통규약.md 독자 · 문체 · 용어 · 코드 · 도식 · 형광펜
@@ -71,17 +72,24 @@ shared/instructions/
 판단은 에이전트가, **확인은 스크립트가** 한다. 사람이 눈으로 세는 규칙은 반드시 새고, 특히 낡은 검수 판정은 눈으로 절대 못 잡는다.
 
 ```bash
+python3 ~/.claude/orchestration/book.py check <출력경로> --stage intake  # 접수
 python3 ~/.claude/orchestration/book.py check <출력경로> --stage plan
+python3 ~/.claude/orchestration/book.py check <출력경로> --stage design  # 설계 검수 통과
 python3 ~/.claude/orchestration/book.py check <출력경로> --stage draft --chapter 03
 python3 ~/.claude/orchestration/book.py check <출력경로> --stage review
+python3 ~/.claude/orchestration/book.py check <출력경로> --stage review --axis 정확성  # 검수자용: 다른 축 메시지를 뺀다
 python3 ~/.claude/orchestration/book.py check <출력경로> --stage final  # 기본값
 python3 ~/.claude/orchestration/book.py inputs <출력경로> 03  # 집필 입력해시
-python3 ~/.claude/orchestration/book.py review-inputs <출력경로> 03  # 검수 입력해시
+python3 ~/.claude/orchestration/book.py review-inputs <출력경로> 03 정확성  # 검수 입력해시 (축: 정확성|독자)
+python3 ~/.claude/orchestration/book.py tally <출력경로> --chapter 03  # 검수 이력에서 상한 집계
 python3 ~/.claude/orchestration/book.py build <출력경로>   # final 통과 후 합본
 python3 ~/.claude/orchestration/book.py hash <파일>       # 원고·계약 판본 해시
+python3 ~/.claude/orchestration/book.py hash <출력경로>/00-설계  # 설계 전체 판본 해시
 ```
 
-`check`는 누락된 원고·검수, 미해결 S1, 리포트 대상·계약·원고 해시, 지적 개수 불일치, 중복 챕터 번호, 목차 누락과 의존성 순환을 확인한다. 계약·설계·선수 요약이 바뀌면 입력해시로 낡은 원고를 잡는다. S2/S3와 형광펜 개수 초과는 경고이며 S2만으로 편집을 막지 않는다. 최종 인계에서는 전체 챕터를 연결한 `index.md`와 확인 필요 주석의 해소도 요구한다.
+`check`는 누락된 원고·검수, 미해결 S1, 리포트 대상·계약·원고 해시, 지적 개수 불일치, 중복 챕터 번호, 목차 누락과 의존성 순환을 확인한다. `intake`는 접수한 목차와 상태 파일을, `plan`은 설계 점검표 중 셀 수 있는 것(계약 필수 절·질문 2~3개·소유 번호·레벨 표·표의 빈 칸)을 본다 — 원고가 생긴 뒤에는 경고로 낮춘다. `design`은 집필 전에 두 검수자가 설계 전체를 본 리포트가 현재 `00-설계`에 대한 것이고 S1이 없는지 본다. 검수 지적에는 `귀속`(원고·계약)이 붙어, 계약 탓인 S1은 집필자가 아니라 설계자에게 돌아가고 계약 탓인 S2·S3는 `tally`의 `계약대기`로 모였다가 다음 계약 수정에 동봉된다. 원고의 `확인 필요` 표시마다 정확성 리포트가 그 줄에 답했는지도 `review`가 본다. 계약·설계·선수 요약이 바뀌면 입력해시로 낡은 원고를 잡는다. 리포트의 「판정」·「검수 이력」 마지막 행이 현재 판본과 맞는지도 본다. S2/S3, 미확인, 형광펜 개수 초과, 계약 범위 밖의 분량과 질문 수와 다른 소제목 수는 경고이며 S2만으로 편집을 막지 않는다. 최종 인계에서는 전체 챕터를 연결한 `index.md`, 확인 필요 주석의 해소, 모든 미확인의 사용자 수락(`미확인-수락.md`)도 요구한다.
+
+되돌림 상한(값과 이유는 파이프라인 「막혔을 때」)은 지휘자의 기억이 아니라 `tally`가 검수 이력에서 센다. 걸리면 그 챕터는 `blocked`로 멈추고 사용자에게 넘어간다. 강제 통과는 없고, 계약을 고쳐 `계약버전`을 올려야 다시 움직인다.
 
 챕터를 재집필하면 옛 리포트의 `S1: 0`이 그대로 남는다. 그래서 검수자는 판정에 **대상 원고의 해시**를 적고, 엮기 전에 대조한다. 판정은 챕터가 아니라 **판본**에 대한 것이다.
 
@@ -109,6 +117,6 @@ python3 ~/.claude/orchestration/book.py hash <파일>       # 원고·계약 판
 ## 알아 둘 것
 
 - 서브에이전트의 결과는 사용자에게 자동으로 보이지 않는다. 지휘자가 옮겨 적는다
-- 모든 역할을 합쳐 작업자는 최대 3명이다. 이 한도와 파일 소유권은 지휘자가 따르는 협업 규칙이며 OS 수준의 접근 통제가 아니다
+- 모든 역할을 합쳐 작업자는 최대 3명이다. 이 한도와 파일 소유권은 지휘자가 따르는 협업 규칙이며 OS 수준의 접근 통제가 아니다. 훅은 그중 검수 독립성을 깨는 Write·Edit만 막는 보조 계층이다(파이프라인 「훅 — 보조 계층」)
 - 하네스 자체를 고치는 요청은 유지보수다. 집필 파이프라인을 시작하지 않는다
 - 내부 작업 스킬은 `user-invocable: false`로 메뉴에서 숨기고 역할별로 미리 불러온다. 사용자 진입점은 `/교재`다. 설정 형식은 Claude Code의 [서브에이전트](https://code.claude.com/docs/en/sub-agents#preload-skills-into-subagents)와 [스킬](https://code.claude.com/docs/en/skills#control-who-invokes-a-skill) 공식 문서를 따른다

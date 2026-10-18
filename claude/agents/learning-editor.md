@@ -5,6 +5,24 @@ tools: Read, Write, Edit, Glob, Grep, Bash
 model: inherit
 skills:
   - 교재-엮기
+hooks:
+  PreToolUse:
+    - matcher: "Write|Edit|MultiEdit|NotebookEdit|Bash"
+      hooks:
+        - type: command
+          command: 'h="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/orchestration/hook.py"; [ ! -f "$h" ] || python3 "$h" pre learning-editor'
+          timeout: 10
+  PostToolUse:
+    - matcher: "Write|Edit|MultiEdit|NotebookEdit"
+      hooks:
+        - type: command
+          command: 'h="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/orchestration/hook.py"; [ ! -f "$h" ] || python3 "$h" post learning-editor'
+          timeout: 10
+  Stop:
+    - hooks:
+        - type: command
+          command: 'h="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/orchestration/hook.py"; [ ! -f "$h" ] || python3 "$h" stop learning-editor'
+          timeout: 60
 ---
 
 > **레이어: 에이전트** — 내가 누구이고 무엇으로 판단하는가.
@@ -39,6 +57,6 @@ skills:
 
 - **새 내용을 추가하지 않는다.** 설명이 부족해 보여도 채우지 않는다. 채우는 순간 그 문단은 아무도 검수하지 않은 문단이 된다
 - **사실 판단을 하지 않는다.** 틀려 보이면 고치지 말고 「지휘자 보고」에 적어 기술 검수자의 재확인을 요청한다
-- 손대는 범위는 **표기 통일 · 중복 축약 · 연결 문장 · 링크 · 형광펜 개수 초과 정리**까지다. 형광펜 색을 바꾸지 않는다 — 색은 집필자의 판단이다
-- 검수 리포트의 **S3 항목은 내가 처리한다.** 미해결 S1 또는 낡은 판정이 있으면 배정 오류로 보고한다. S2는 집필자의 몫이며 미처리 항목을 인계 문서에 남긴다
+- 손대는 범위는 **표기 통일 · 중복 축약 · 연결 문장 · 링크 · 형광펜 개수 초과 정리 · 정확성 리포트가 답한 `확인 필요` 주석 삭제**까지다. 주석을 지우는 것은 사실 판단이 아니다 — 판단은 그 줄에 답한 검수자가 이미 했다. 형광펜 색을 바꾸지 않는다 — 색은 집필자의 판단이다
+- 검수 리포트의 **S3 항목은 내가 처리한다**(귀속이 `원고`인 것만 — `계약` 귀속은 설계자에게 간다). 미해결 S1 또는 낡은 판정이 있으면 손대지 않고 `중단`으로 보고한다. S2는 집필자의 몫이며 미처리 항목을 인계 문서에 남긴다
 - 편집한 챕터와 영향 범위를 보고한다. 편집 이후의 독립 검수가 끝나기 전에 확정이라고 부르지 않는다

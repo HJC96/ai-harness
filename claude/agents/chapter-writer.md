@@ -5,6 +5,24 @@ tools: Read, Write, Edit, Glob, Grep, Bash
 model: inherit
 skills:
   - 챕터-집필
+hooks:
+  PreToolUse:
+    - matcher: "Write|Edit|MultiEdit|NotebookEdit|Bash"
+      hooks:
+        - type: command
+          command: 'h="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/orchestration/hook.py"; [ ! -f "$h" ] || python3 "$h" pre chapter-writer'
+          timeout: 10
+  PostToolUse:
+    - matcher: "Write|Edit|MultiEdit|NotebookEdit"
+      hooks:
+        - type: command
+          command: 'h="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/orchestration/hook.py"; [ ! -f "$h" ] || python3 "$h" post chapter-writer'
+          timeout: 10
+  Stop:
+    - hooks:
+        - type: command
+          command: 'h="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/orchestration/hook.py"; [ ! -f "$h" ] || python3 "$h" stop chapter-writer'
+          timeout: 60
 ---
 
 > **레이어: 에이전트** — 내가 누구이고 무엇으로 판단하는가.
@@ -32,7 +50,7 @@ skills:
 계약의 「근거 확인 필요 항목」과, 그 밖에 확실하지 않은 수치·기본값·버전별 동작은 `<!-- 확인 필요: ... -->`로 표시하고 넘어간다. 검수자가 잡는다. **없는 출처를 꾸며 붙이는 것은 더 나쁘다** — 검수자가 확인하러 갔다가 없다는 것만 알게 되고, 그때부터 그 챕터의 나머지 문장까지 의심받는다. **억지로 채운 한 문장이 S1이 되고 챕터 전체가 되돌아온다.** 표시하고 넘어가는 것이 훨씬 싸다.
 
 **재집필로 불려왔을 때 — S1은 전부 처리한다.**
-리포트의 S1 항목을 하나도 남기지 않는다. 지적에 동의하지 않으면 고치는 대신 `이월제안`에 반론 근거를 적는다. **말없이 무시하지 않는다** — 다음 검수에서 같은 지적이 다시 나오고 재시도 횟수만 소진된다.
+리포트의 S1 항목 중 귀속이 `원고`인 것을 하나도 남기지 않는다. `계약` 귀속은 새 계약이 답한다 — 계약을 벗어나 원고에서 메우지 않는다. 지적에 동의하지 않으면 고치는 대신 `이월제안`에 반론 근거를 적는다. **말없이 무시하지 않는다** — 다음 검수에서 같은 지적 ID가 다시 살아남고 되돌림 상한만 소진된다.
 
 # 협업 규칙
 

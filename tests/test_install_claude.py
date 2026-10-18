@@ -10,7 +10,7 @@ REPO = Path(__file__).resolve().parents[1]
 SKILLS = ["교재", "교재-설계", "챕터-집필", "챕터-검수", "교재-엮기"]
 AGENTS = ["curriculum-architect", "chapter-writer", "technical-reviewer",
           "learner-advocate", "learning-editor"]
-ORCH = ["교재-파이프라인.md", "산출물-계약.md", "book.py"]
+ORCH = ["교재-파이프라인.md", "산출물-계약.md", "book.py", "hook.py"]
 
 
 class InstallClaudeTests(unittest.TestCase):
@@ -25,7 +25,6 @@ class InstallClaudeTests(unittest.TestCase):
         (self.root / "claude/agents").mkdir(parents=True)
         (self.root / "shared/orchestration").mkdir(parents=True)
         (self.root / "shared/instructions").mkdir(parents=True)
-        (self.root / "README.md").write_text("fake\n", encoding="utf-8")
         for name in SKILLS:
             d = self.root / "shared/skills" / name
             d.mkdir(parents=True)
@@ -156,6 +155,38 @@ class InstallClaudeTests(unittest.TestCase):
         result = self.run_script("--doctor")
         self.assertEqual(result.returncode, 1)
         self.assertIn("frontmatter", result.stdout)
+
+    def test_doctor_reports_missing_or_misnamed_hooks(self):
+        agent = self.root / "claude/agents/learner-advocate.md"
+        text = agent.read_text(encoding="utf-8")
+        agent.write_text(text.replace("stop learner-advocate", "stop technical-reviewer"), encoding="utf-8")
+        result = self.run_script("--doctor")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("learner-advocate.md: 훅이 다르다", result.stdout)
+        agent.write_text(text, encoding="utf-8")
+        skill = self.root / "shared/skills/교재-엮기/SKILL.md"
+        skill_text = skill.read_text(encoding="utf-8")
+        skill.write_text(skill_text.replace("\n---\n", "\nhooks:\n  Stop: []\n---\n", 1), encoding="utf-8")
+        result = self.run_script("--doctor")
+        self.assertIn("훅은 역할과 `교재` 스킬에만 둔다", result.stdout)
+
+    def test_doctor_reports_reviewers_on_different_grades(self):
+        agent = self.root / "claude/agents/learner-advocate.md"
+        agent.write_text(agent.read_text(encoding="utf-8").replace("effort: high", "effort: low"), encoding="utf-8")
+        result = self.run_script("--doctor")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("두 검수자의 model·effort가 다르다", result.stdout)
+
+    def test_doctor_reports_duplicate_definitions(self):
+        skill = self.root / "shared/skills/챕터-검수/SKILL.md"
+        skill.write_text(skill.read_text(encoding="utf-8") + "\n| S1 | 틀린 사실 |\n", encoding="utf-8")
+        pipeline = self.root / "shared/orchestration/교재-파이프라인.md"
+        pipeline.write_text(pipeline.read_text(encoding="utf-8").replace("| **4회** |", "| **5회** |"),
+                            encoding="utf-8")
+        result = self.run_script("--doctor")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("심각도 정의는 shared/orchestration/산출물-계약.md에만 둔다", result.stdout)
+        self.assertIn("한 챕터의 재집필 횟수", result.stdout)
 
     def test_standard_config_directory_takes_precedence(self):
         alternate = self.home / "custom config"

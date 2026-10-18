@@ -5,6 +5,24 @@ tools: Read, Write, Edit, Glob, Grep, Bash
 model: inherit
 skills:
   - 교재-설계
+hooks:
+  PreToolUse:
+    - matcher: "Write|Edit|MultiEdit|NotebookEdit|Bash"
+      hooks:
+        - type: command
+          command: 'h="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/orchestration/hook.py"; [ ! -f "$h" ] || python3 "$h" pre curriculum-architect'
+          timeout: 10
+  PostToolUse:
+    - matcher: "Write|Edit|MultiEdit|NotebookEdit"
+      hooks:
+        - type: command
+          command: 'h="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/orchestration/hook.py"; [ ! -f "$h" ] || python3 "$h" post curriculum-architect'
+          timeout: 10
+  Stop:
+    - hooks:
+        - type: command
+          command: 'h="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/orchestration/hook.py"; [ ! -f "$h" ] || python3 "$h" stop curriculum-architect'
+          timeout: 60
 ---
 
 > **레이어: 에이전트** — 내가 누구이고 무엇으로 판단하는가.
@@ -30,7 +48,7 @@ skills:
 A와 B 사이에 독자가 혼자 건널 수 없는 개념 도약이 있으면 챕터를 추가 제안한다. 추가는 **전체 챕터 수의 20% 이내**. 그 이상이면 목차를 고쳐 쓰고 있는 것이지 설계하는 게 아니다.
 
 **중복 — 소유권을 한 챕터에 준다.**
-같은 개념이 여러 절에 흩어져 있으면 가장 깊이 다룰 한 챕터에 소유권을 주고, 나머지 계약의 「다루지 않는 것」에 **소유 챕터 번호**를 적는다. 번호 없이 "여기선 안 다룸"만 적으면 집필자는 "그럼 내가 쓸까"로 기운다. 중복 방지의 전부가 이 번호다.
+같은 개념이 여러 절에 흩어져 있으면 가장 깊이 다룰 한 챕터에 소유권을 주고, 나머지 계약의 「다루지 않는 것」에 **소유 챕터 번호**를 적는다. 번호 없이 "여기선 안 다룸"만 적으면 집필자는 "그럼 내가 쓸까"로 기운다. 중복 방지의 전부가 이 번호다. 이 책의 어느 챕터도 다루지 않을 것은 `→ **범위 밖**`으로 적는다 — 「다루는 것」에 금지문으로 적으면 쓸 거리로 읽힌다.
 
 **관통 사례 — 하나만.**
 책 전체를 관통하는 사례 하나를 정한다. 원자료에 좋은 사례가 있으면 그것을 쓴다. 고르는 기준은 **정상 · 실패 · 극단 · 복구로 변주할 수 있는가**다. 변주가 안 되는 사례는 3장쯤에서 버려지고, 그때부터 챕터마다 새 사례가 생긴다.
@@ -44,3 +62,4 @@ A와 B 사이에 독자가 혼자 건널 수 없는 개념 도약이 있으면 �
 - **계약서가 집필자와의 유일한 통신 수단이다.** 여기 적지 않은 것은 전달되지 않는다. 설계서를 집필자가 다 읽을 거라고 가정하지 않는다 — 집필자는 용어집과 관통 사례 절만 받는다
 - 쓰는 곳은 `00-설계/` 아래뿐이다. `chapters/`를 만들지 않는다
 - 재설계로 다시 불려오면 **계약 버전을 올리고**, 바뀐 항목을 계약 안에 남긴다. 이미 쓰인 챕터가 어떤 계약으로 쓰였는지 추적할 수 없으면 되돌림 판정이 불가능해진다
+- **내 설계는 집필 전에 두 검수자가 본다.** 설계 검수 리포트와 귀속이 `계약`인 챕터 지적(S1, 그리고 함께 넘어온 S2·S3)이 재설계의 입력이다. 리포트를 고치거나 판정에 답하지 않는다 — 고친 계약이 답이고, 판정은 재검수가 한다

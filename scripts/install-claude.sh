@@ -5,7 +5,7 @@
 #   bash scripts/install-claude.sh --check    상태만 확인 (쓰지 않음)
 #   bash scripts/install-claude.sh --dry-run  할 일만 출력
 #   bash scripts/install-claude.sh --uninstall 이 하네스가 만든 링크만 제거
-#   bash scripts/install-claude.sh --doctor   하네스 자체 점검 (이름·경로 정합성)
+#   bash scripts/install-claude.sh --doctor   하네스 자체 점검 (이름·경로·훅 정합성, 정의 중복)
 #
 # 원본은 저장소에 남고 ~/.claude 에는 링크만 생긴다. 저장소에서 파일을 고치면
 # 즉시 반영된다. 이미 있는 실제 파일·디렉터리는 절대 덮어쓰지 않는다.
@@ -16,7 +16,7 @@ CLAUDE_HOME="${CLAUDE_CONFIG_DIR:-${CLAUDE_HOME:-$HOME/.claude}}"
 
 SKILLS=(교재 교재-설계 챕터-집필 챕터-검수 교재-엮기)
 AGENTS=(curriculum-architect chapter-writer technical-reviewer learner-advocate learning-editor)
-ORCH=(교재-파이프라인.md 산출물-계약.md book.py)
+ORCH=(교재-파이프라인.md 산출물-계약.md book.py hook.py)
 
 MODE=install
 if [[ $# -gt 1 ]]; then echo "옵션은 한 번에 하나만 지정한다." >&2; exit 2; fi
@@ -83,18 +83,58 @@ roles = {"curriculum-architect": "교재-설계", "chapter-writer": "챕터-집�
          "learning-editor": "교재-엮기"}
 paths = {"skills": root / "shared/skills", "agents": root / "claude/agents",
          "instructions": root / "shared/instructions", "orchestration": root / "shared/orchestration"}
-errors, docs = [], []
+errors, docs, grades = [], [], {}
+# 훅은 역할마다 자기 이름으로 hook.py를 부른다. 메인 세션은 `교재` 스킬이 main으로 부른다.
+hooked = {**{a: {"PreToolUse": "pre", "PostToolUse": "post", "Stop": "stop"} for a in roles},
+          "교재": {"PreToolUse": "pre", "PostToolUse": "post"}}
+def split_hooks(path):
+    """frontmatter에서 hooks 블록을 떼어 낸다. 나머지는 문서 계약의 YAML 부분집합이다."""
+    text = path.read_text(encoding="utf-8")
+    m = re.match(r"\A---\n(.*?)\n---\n", text, re.S)
+    if not m:
+        return text, []
+    keep, block, inside = [], [], False
+    for line in m.group(1).splitlines():
+        if not line[:1].isspace():
+            inside = line.startswith("hooks:")
+        (block if inside else keep).append(line)
+    return "---\n" + "\n".join(keep) + "\n---\n" + text[m.end():], block
+def check_hooks(name, path, block):
+    want = hooked.get(name, {})
+    if not want:
+        if block:
+            errors.append(f"{path}: 훅은 역할과 `교재` 스킬에만 둔다")
+        return
+    events, found = None, set()
+    for line in block[1:]:
+        if re.match(r"^  \S", line):
+            events = line.strip().rstrip(":")
+        m = re.search(r'orchestration/hook\.py"; \[ ! -f "\$h" \] \|\| python3 "\$h" (\w+) (\S+?)\'?$', line)
+        if m:
+            found.add((events, m.group(1), m.group(2)))
+    role = "main" if name == "교재" else name
+    expected = {(event, mode, role) for event, mode in want.items()}
+    if found != expected:
+        errors.append(f"{path}: 훅이 다르다 — 필요: {sorted(expected)} / 있음: {sorted(found)}")
 for name, path in ([(s, paths["skills"] / s / "SKILL.md") for s in skills]
                    + [(a, paths["agents"] / (a + ".md")) for a in roles]):
     docs.append(path)
     try:
-        fm = book.frontmatter(path)
+        text, block = split_hooks(path)
+        check_hooks(name, path, block)
+        fm = book.frontmatter(path, text)
         if fm.get("name") != name or not fm.get("description"):
             errors.append(f"{path}: name/description 누락 또는 불일치")
         if name in roles and fm.get("skills") != [roles[name]]:
             errors.append(f"{path}: 역할에 맞는 스킬을 preload해야 한다")
+        if name in roles:
+            grades[name] = (fm.get("model"), fm.get("effort"))
     except (OSError, ValueError) as exc:
         errors.append(str(exc))
+# 두 검수자는 같은 모델·effort로 돈다. 한쪽만 바뀌면 두 축의 판정 깊이가 달라진다.
+reviewers = [grades.get(r) for r in ("technical-reviewer", "learner-advocate")]
+if None not in reviewers and reviewers[0] != reviewers[1]:
+    errors.append(f"두 검수자의 model·effort가 다르다 — technical-reviewer {reviewers[0]} / learner-advocate {reviewers[1]}")
 docs += list((root / "shared/orchestration").glob("*.md"))
 docs += [root / "shared/instructions/교재-공통규약.md", root / "claude/CLAUDE.md"]
 for path in docs:
@@ -108,6 +148,28 @@ for path in docs:
         top, _, tail = ref.partition("/")
         if top in paths and not (paths[top] / tail).exists():
             errors.append(f"{path.name}: 참조 원본 없음: {ref}")
+# 같은 정의는 소유 문서 한 곳에만 둔다. 다른 문서는 소유 문서를 가리킨다.
+contract = root / "shared/orchestration/산출물-계약.md"
+owners = [("심각도", r"^\|\s*\**S[123]\**\s*\|", contract),
+          ("검수 이력 열", r"\|\s*회차\s*\|\s*계기\s*\|", contract),
+          ("작업 상태 순서", r"계약완료\W+집필중", contract),
+          ("깊이별 읽기 시간", r"(?:압축|표준|정밀)\W{0,4}(?:\(챕터당 )?[0-9]+(?:~[0-9]+)?분",
+           root / "shared/skills/교재-설계/SKILL.md"),
+          ("되돌림 상한 값", r"[0-9]+회\s*·\s*재집필\s*[0-9]+회", None)]
+for path in docs:
+    if not path.is_file():
+        continue
+    for ln, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        for label, pattern, owner in owners:
+            if path != owner and re.search(pattern, line):
+                where = owner.relative_to(root) if owner else "교재-파이프라인.md 「막혔을 때」·book.py"
+                errors.append(f"{path.relative_to(root)}:{ln}: {label} 정의는 {where}에만 둔다")
+# 상한 값은 파이프라인 표(이유)와 book.py(집행) 두 곳에 있어야 하므로 값이 같은지 본다.
+pipeline = (root / "shared/orchestration/교재-파이프라인.md").read_text(encoding="utf-8")
+for label, constant in (("같은 지적이 살아남은 횟수", book.SURVIVAL_LIMIT), ("한 챕터의 재집필 횟수", book.REWRITE_LIMIT)):
+    m = re.search(rf"^\|\s*{label}\s*\|\s*\**([0-9]+)회", pipeline, re.M)
+    if not m or int(m.group(1)) != constant:
+        errors.append(f"교재-파이프라인.md 「{label}」 값이 book.py의 {constant}와 다르다")
 for error in errors:
     print(f"  ✗ {error}")
 print(f"Claude 하네스 원본 검사: {'실패' if errors else '통과'}")
@@ -155,7 +217,7 @@ if [[ "$MODE" != uninstall ]]; then
   [[ $problems -eq 0 ]] || exit 1
 fi
 if [[ "$MODE" == dry ]]; then
-  echo "충돌 없음. $CLAUDE_HOME 에 스킬 5개·역할 5개·지휘 파일 3개·공통규약을 연결할 수 있다."
+  echo "충돌 없음. $CLAUDE_HOME 에 스킬 5개·역할 5개·지휘 파일 4개·공통규약을 연결할 수 있다."
   [[ "$legacy" != true ]] || echo "기존 orchestration 디렉터리 링크를 파일별 연결로 전환한다."
   exit 0
 fi

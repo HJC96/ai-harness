@@ -2,6 +2,19 @@
 name: 교재
 argument-hint: "<목차 | 이어서·검수·재집필·상태·설계> [경로] [챕터번호]"
 description: 사용자가 제공한 목차로 학습용 Markdown 교재를 만들 때 입력을 접수하는 진입점. /교재 또는 "이 목차로 책처럼 써줘", "교재로 엮어줘" 요청에 사용한다. 신규·이어서·검수·재집필·상태·설계 의도를 오케스트레이터에 넘긴다. 본문을 직접 쓰거나 팀을 배치하지 않는다. 기존 원문을 요약하기만 하는 요청에는 사용하지 않는다.
+hooks:
+  PreToolUse:
+    - matcher: "Write|Edit|MultiEdit|NotebookEdit|Bash"
+      hooks:
+        - type: command
+          command: 'h="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/orchestration/hook.py"; [ ! -f "$h" ] || python3 "$h" pre main'
+          timeout: 10
+  PostToolUse:
+    - matcher: "Write|Edit|MultiEdit|NotebookEdit"
+      hooks:
+        - type: command
+          command: 'h="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/orchestration/hook.py"; [ ! -f "$h" ] || python3 "$h" post main'
+          timeout: 10
 ---
 
 # 교재 — 목차를 한 권의 학습 교재로 `/교재`
@@ -47,7 +60,7 @@ description: 사용자가 제공한 목차로 학습용 Markdown 교재를 만�
 
 ### 깊이
 
-`표준`(챕터당 25~40분) / `압축`(15분) / `정밀`(45~60분). 지정이 없으면 `표준`.
+`표준` / `압축` / `정밀`. 지정이 없으면 `표준`. 깊이별 읽기 시간과 분량은 `~/.claude/skills/교재-설계/SKILL.md` 4단계 표에 있다 — 사용자에게 고르게 할 때 그 표를 보인다.
 
 ---
 
