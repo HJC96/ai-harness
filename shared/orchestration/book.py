@@ -1034,8 +1034,9 @@ def main(argv):
     except (OSError, ValueError) as exc:
         err(str(exc))
 
+    failed = bool(ERR)
     if getattr(args, "axis", None):
-        # 검수 독립성: 다른 축 리포트의 판정·개수가 검수자에게 보이지 않게 한다.
+        # 검수 독립성: 다른 축 리포트의 판정·개수가 검수자에게 보이지 않게 한다. 결과는 바꾸지 않는다.
         other = next(a for a in AXES if a != args.axis)
         for messages in (ERR, WARN):
             messages[:] = [m for m in messages if f"-{other}.md" not in m and f"/{other}/" not in m]
@@ -1045,6 +1046,9 @@ def main(argv):
         print(f"  ✗ {m}")
     if ERR:
         print(f"\n오류 {len(ERR)}건. 통과시키지 않는다.")
+        return 1
+    if failed:
+        print("\n다른 축에 관한 오류가 있어 통과시키지 않는다. 내용은 뺐다.")
         return 1
     print(f"\n통과. 경고 {len(WARN)}건." if WARN else "\n통과.")
     return 0

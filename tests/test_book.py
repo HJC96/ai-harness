@@ -414,6 +414,13 @@ class BookTests(unittest.TestCase):
         self.assertNotIn("설계-독자.md", self.check("design", "--axis", "정확성")[1])
         self.assertIn("설계-정확성.md: S2", self.check("design", "--axis", "정확성")[1])
 
+    def test_axis_option_keeps_the_result_when_only_the_other_axis_fails(self):
+        self.report("01", "정확성", [("S1-1", "S1")])
+        code, out = self.check("review", "--axis", "독자")
+        self.assertEqual(code, 1)
+        self.assertNotIn("S1-1", out)
+        self.assertNotIn("통과.", out)
+
     def test_same_design_finding_surviving_two_redesigns_blocks_the_book(self):
         a, b = "a" * 64, "b" * 64
         self.design_report("정확성", [("S1-1", "S1")], earlier=[("첫 검수", a, ["S1-1"])])
