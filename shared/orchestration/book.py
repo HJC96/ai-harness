@@ -11,7 +11,7 @@
 판단은 하지 않는다. 기계로 확인할 수 있는 것만 본다 —
 접수한 목차와 상태 파일, 설계 점검표 중 셀 수 있는 것, 설계 검수, 계약 버전 일치,
 검수 판정의 신선도, 검수 이력·귀속과 상한, 확인 필요 표시의 답, 미확인 수락, 링크·앵커,
-목차 항목 누락, 분량·소제목 수, 형광펜 개수.
+목차 항목 누락, 분량·소제목 수, 형광펜 개수, index.md 「남은 것」의 열린 지적.
 """
 import argparse
 import ast
@@ -386,18 +386,32 @@ def tally_chapter(no, histories, current, findings=None):
             "열린지적": opened, "계약귀속": contract, "계약대기": waiting, "막힘": blocked}
 
 
-def tally_design(histories):
-    """설계 검수 리포트의 상한. 계약버전으로 나누지 않고 같은 지적의 재설계 생존만 센다."""
-    redesigns, opened, blocked = set(), {}, []
+def tally_design(histories, findings=None):
+    """설계 검수 리포트의 상한. 계약버전으로 나누지 않고 같은 지적의 재설계 생존만 센다.
+
+    설계 지적의 귀속은 모두 계약이므로 열린 S2·S3는 전부 `계약대기`다."""
+    redesigns, opened, waiting, blocked = set(), {}, [], []
     for axis, rows in sorted(histories.items()):
         redesigns.update(row["대상해시"] for row in rows if row["계기"] == "재설계")
         survived = survivals(rows, "재설계")
         for identity in sorted(rows[-1]["미해결 S1"]):
             opened[f"{DESIGN}/{axis}/{identity}"] = survived.get(identity, 0)
+        waiting += [f"{DESIGN}/{axis}/{identity}" for identity, (severity, _) in
+                    sorted((findings or {}).get(axis, {}).items()) if severity in ("S2", "S3")]
     for key, count in opened.items():
         if count >= SURVIVAL_LIMIT:
             blocked.append(f"같은 설계 지적 {key}이 재설계 {count}회를 살아남았다")
-    return {"재설계": len(redesigns), "열린지적": opened, "막힘": blocked}
+    return {"재설계": len(redesigns), "열린지적": opened, "계약대기": waiting, "막힘": blocked}
+
+
+def disclosed(prefix, findings):
+    """index.md 「남은 것」에 추적 키로 적어야 하는 열린 지적(산출물 계약 3절 「남은 지적 공개」)."""
+    return {f"{prefix}/{identity}" for identity, (severity, owner) in findings.items()
+            if severity == "S2" or (severity == "S3" and owner == "계약")}
+
+
+def opened_keys(prefix, findings):
+    return {f"{prefix}/{identity}" for identity, (severity, _) in findings.items() if severity != "해결"}
 
 
 def accepted(root):
@@ -431,12 +445,13 @@ def tally(root: Path, selected=None):
                 owned[rfm.get("축")] = findings
         result[no] = tally_chapter(no, histories, contracts[no][1].get("계약버전"), owned)
     if not selected and reviews.get(DESIGN):
-        histories = {}
+        histories, owned = {}, {}
         for rp, rfm in reviews[DESIGN]:
-            history = parse_report(rp, rfm, design=True)[3]
+            _, findings, _, history = parse_report(rp, rfm, design=True)
             if history is not None:
                 histories[rfm.get("축")] = history
-        result[DESIGN] = tally_design(histories)
+                owned[rfm.get("축")] = findings
+        result[DESIGN] = tally_design(histories, owned)
     return result
 
 
@@ -503,6 +518,9 @@ def intake(root):
     if "목차원본" in state and (not isinstance(source, str) or not source.strip()
                                or not (root / source).is_file()):
         err(f"{STATE}: `목차원본`이 출력 경로 기준으로 있는 파일이 아니다")
+
+
+LINK_TEXT = re.compile(r"\[([^\]\n]*)\]\((?:<[^>\n]+>|[^\s()]+)(?:\s+\"[^\"\n]*\")?\)")
 
 
 def size_range(value):
@@ -621,10 +639,10 @@ def check_design_reviews(root, reports, report, stage):
     남은 S2·S3·미확인은 design과 final에서만 알린다 — 집필 중에는 이미 본 경고다."""
     if not reports:
         report("설계 검수 리포트가 없다. 검수/설계-정확성.md·설계-독자.md가 필요하다")
-        return
+        return set(), set()
     if sorted(str(r[1].get("축")) for r in reports) != sorted(AXES):
         err("설계 검수: 정확성·독자 리포트가 각각 하나씩 필요하다")
-    current, histories = tree_hash(root / DESIGN_DIR), {}
+    current, histories, required, opened = tree_hash(root / DESIGN_DIR), {}, set(), set()
     for rp, rfm in reports:
         axis = rfm.get("축")
         if rfm.get("대상") != DESIGN_DIR or rp.name != f"{DESIGN}-{axis}.md":
@@ -634,6 +652,8 @@ def check_design_reviews(root, reports, report, stage):
         counts, findings, unknowns, history = parse_report(rp, rfm, design=True)
         if history is not None:
             histories[axis] = history
+        required |= disclosed(f"{DESIGN}/{axis}", findings)
+        opened |= opened_keys(f"{DESIGN}/{axis}", findings)
         if counts["S1"]:
             ids = ", ".join(i for i, (s, _) in sorted(findings.items()) if s == "S1")
             err(f"{rp.name}: 미해결 S1 {ids} — 설계자에게 재설계를 배정한다")
@@ -646,6 +666,19 @@ def check_design_reviews(root, reports, report, stage):
             warn(f"{rp.name}: 미확인 {len(unknowns)}건 — 계약의 「근거 확인 필요 항목」으로 넘긴다")
     for reason in tally_design(histories)["막힘"]:
         err(f"설계: 상한 도달 — {reason}. 사용자에게 넘긴다")
+    return required, opened
+
+
+OPEN_KEY = re.compile(r"(?:[0-9]{2,}|" + DESIGN + r")/(?:정확성|독자)/S[123]-[1-9][0-9]*")
+
+
+def check_remaining(index, required, opened):
+    """index.md 「남은 것」을 현재 리포트의 열린 지적과 대조한다. 빠진 키는 오류, 닫힌 키는 경고."""
+    listed = set(OPEN_KEY.findall("\n".join(section(body(index), "남은 것"))))
+    for key in sorted(required - listed):
+        err(f"index.md 「남은 것」에 열린 지적 {key}이 없다 — 현재 리포트에 맞게 편집자가 갱신한다")
+    for key in sorted(listed - opened):
+        warn(f"index.md 「남은 것」의 {key}은 지금 열린 지적이 아니다 — 해결됐거나 재검수에서 사라졌다")
 
 
 MARKER = "<!-- 확인 필요"
@@ -753,7 +786,7 @@ def check(root: Path, stage="final", selected=None):
     if stage == "plan":
         return
     # 원고가 생기기 전에 설계 검수를 요구하고, 이 규칙 전에 집필이 시작된 책에는 알리기만 한다.
-    check_design_reviews(root, reviews.get(DESIGN, []), warn if chapters else err, stage)
+    required, opened = check_design_reviews(root, reviews.get(DESIGN, []), warn if chapters else err, stage)
     if stage == "design":
         return
     wanted = set(selected or contracts)
@@ -785,7 +818,7 @@ def check(root: Path, stage="final", selected=None):
             err(f"{no}장: frontmatter `요약`이 비었다")
         if not body(p).strip():
             err(f"{no}장: 본문이 비었다")
-        size, length = size_range(cf.get("분량")), len(body(p))
+        size, length = size_range(cf.get("분량")), len(LINK_TEXT.sub(r"\1", body(p)))
         if size and not size[0] <= length <= size[1]:
             warn(f"{p.name}: 본문 {length}자 — 계약 분량 {cf['분량']} 밖")
         asked = len(questions(body(cp)))
@@ -828,6 +861,8 @@ def check(root: Path, stage="final", selected=None):
                 counts, findings, unknowns, history = parse_report(rp, rfm)
                 if history is not None:
                     histories[axis] = history
+                required |= disclosed(f"{no}/{axis}", findings)
+                opened |= opened_keys(f"{no}/{axis}", findings)
                 for key, count in counts.items():
                     value = rfm.get(key)
                     if count or (isinstance(value, str) and value.isdigit() and int(value)):
@@ -888,6 +923,7 @@ def check(root: Path, stage="final", selected=None):
         for p, _ in chapters.values():
             if p.resolve() not in index_links:
                 err(f"index.md: {p.name} 링크 누락")
+        check_remaining(index, required, opened)
 
     # 형광펜 개수 (소단원당 3개 이내)
     for p in paths:

@@ -187,8 +187,38 @@ class BookTests(unittest.TestCase):
         self.assertIn("미해결 S1", output)
         self.reviews("S2")
         code, output = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("「남은 것」에 열린 지적 01/정확성/S2-1이 없다", output)
+        self.remaining("- `01/정확성/S2-1` — 근거 없는 단정")
+        code, output = self.check()
         self.assertEqual(code, 0, output)
         self.assertIn("S2 1건 남음", output)
+
+    def remaining(self, *lines):
+        index = self.root / "index.md"
+        index.write_text(index.read_text(encoding="utf-8").split("\n## 남은 것\n")[0]
+                         + "\n## 남은 것\n" + "".join(f"{line}\n" for line in lines), encoding="utf-8")
+
+    def test_final_matches_remaining_section_to_current_reports(self):
+        # 11번 한 바퀴: 편집 뒤 재검수로 판정이 바뀌었는데 「남은 것」이 낡은 채 final을 통과했다.
+        self.report("01", "정확성", [("S2-1", "S2"), ("S3-1", "S3"), ("S3-2", "S3", "계약")])
+        self.report("02", "독자", [("S2-1", "S2", "계약")])
+        self.design_report("독자", [("S3-1", "S3")])
+        self.remaining("- `01/정확성/S2-1` — 단정", "- `02/정확성/S2-4` — 예전 판본의 지적")
+        code, output = self.check()
+        self.assertEqual(code, 1)
+        for key in ("01/정확성/S3-2", "02/독자/S2-1", "설계/독자/S3-1"):
+            self.assertIn(f"「남은 것」에 열린 지적 {key}이 없다", output)
+        self.assertNotIn("01/정확성/S2-1이 없다", output)
+        self.assertNotIn("01/정확성/S3-1이 없다", output)  # 원고 귀속 S3는 자유 형식
+        self.assertIn("「남은 것」의 02/정확성/S2-4은 지금 열린 지적이 아니다", output)
+        self.remaining("- `01/정확성/S2-1` — 단정", "- `01/정확성/S3-1` — 표현",
+                       "- `01/정확성/S3-2` (계약 귀속) — 표기", "- `02/독자/S2-1` (계약 귀속) — 과밀",
+                       "- `설계/독자/S3-1` (계약 귀속) — 표현")
+        code, output = self.check()
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("지금 열린 지적이 아니다", output)
+        self.assertNotIn("독자", self.check("final", "--axis", "정확성")[1])
 
     def test_review_counter_cannot_hide_an_issue(self):
         self.reviews("S1")
@@ -425,7 +455,8 @@ class BookTests(unittest.TestCase):
         a, b = "a" * 64, "b" * 64
         self.design_report("정확성", [("S1-1", "S1")], earlier=[("첫 검수", a, ["S1-1"])])
         code, output = self.run_book("tally", str(self.root))
-        self.assertEqual(json.loads(output)["설계"], {"재설계": 1, "열린지적": {"설계/정확성/S1-1": 1}, "막힘": []})
+        self.assertEqual(json.loads(output)["설계"],
+                         {"재설계": 1, "열린지적": {"설계/정확성/S1-1": 1}, "계약대기": [], "막힘": []})
         self.design_report("정확성", [("S1-1", "S1")],
                            earlier=[("첫 검수", a, ["S1-1"]), ("재설계", b, ["S1-1"])])
         design = json.loads(self.run_book("tally", str(self.root))[1])["설계"]
@@ -584,6 +615,22 @@ class BookTests(unittest.TestCase):
         self.assertIn("01-chapter-01.md: 본문", output)
         self.assertIn("계약 분량 1~300자 밖", output)
         self.assertIn("`##` 소제목 1개 — 계약 질문 2개와 다르다", output)
+
+    def test_design_s2_s3_wait_for_the_next_contract_change(self):
+        # 11번 한 바퀴: 설계 리포트의 S2·S3가 `계약대기`에 나오지 않아 편집자가 리포트에서 옮겼다.
+        self.design_report("독자", [("S2-3", "S2"), ("S3-2", "S3")])
+        code, output = self.run_book("tally", str(self.root))
+        self.assertEqual(json.loads(output)["설계"]["계약대기"], ["설계/독자/S2-3", "설계/독자/S3-2"])
+
+    def test_size_counts_only_the_link_text(self):
+        # 11번 한 바퀴: 편집자가 단 링크 주소 때문에 02장이 계약 분량을 넘었다.
+        link = "[앞 장](01-chapter-01.md#연습) "
+        self.write_chapter("02", text="# 장 02\n\n## 연습\n" + link * 20 + "\n\n## 응용\n본문\n\n## 다 읽고 나면\n정리")
+        self.reviews()
+        self.assertGreater(len(book.body(self.chapter("02"))), 300)
+        code, output = self.check("draft")
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("계약 분량", output)
 
     def test_malformed_frontmatter_fails_cleanly(self):
         self.chapter("01").write_text("---\n번호: 01\n요약: |\n  여러 줄\n---\n본문", encoding="utf-8")
